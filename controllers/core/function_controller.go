@@ -610,6 +610,9 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 		log.Error(err, "Failed to SetOwnerReferences for serving")
 		return err
 	}
+	if fn.Status.Build != nil && fn.Status.Build.State == openfunction.Skipped {
+		serving.Spec.Image = fn.Spec.Image
+	}
 
 	if err := r.Create(r.ctx, serving); err != nil {
 		log.Error(err, "Failed to create serving")
