@@ -23,6 +23,8 @@ import (
 	"reflect"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/go-logr/logr"
@@ -30,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -477,25 +478,20 @@ func (r *GatewayReconciler) mutateService(
 	externalName string,
 	service *corev1.Service) controllerutil.MutateFn {
 	return func() error {
-		if r.k8sGateway != nil {
-			var servicePorts []corev1.ServicePort
-			for _, listener := range gateway.Spec.GatewaySpec.Listeners {
-				if !strings.HasSuffix(string(*listener.Hostname), gateway.Spec.ClusterDomain) {
-					servicePort := corev1.ServicePort{
-						Name:       string(listener.Name),
-						Protocol:   corev1.ProtocolTCP,
-						Port:       int32(listener.Port),
-						TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(listener.Port)},
-					}
-					servicePorts = append(servicePorts, servicePort)
-				}
-			}
-			service.Spec.Type = corev1.ServiceTypeExternalName
-			service.Spec.Ports = servicePorts
-			service.Spec.ExternalName = externalName
-			return ctrl.SetControllerReference(gateway, service, r.Scheme)
+
+		servicePorts := []corev1.ServicePort{
+			{
+				Name:       "api",
+				Protocol:   corev1.ProtocolTCP,
+				Port:       80,
+				TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(80)},
+			},
 		}
-		return nil
+		service.Spec.Type = corev1.ServiceTypeExternalName
+		service.Spec.Ports = servicePorts
+		service.Spec.ExternalName = externalName
+		return ctrl.SetControllerReference(gateway, service, r.Scheme)
+
 	}
 }
 

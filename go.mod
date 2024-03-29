@@ -21,7 +21,7 @@ require (
 	k8s.io/utils v0.0.0-20230505201702-9f6742963106
 	knative.dev/serving v0.32.0
 	sigs.k8s.io/controller-runtime v0.15.0-alpha.0
-	sigs.k8s.io/gateway-api v0.5.0
+	sigs.k8s.io/gateway-api v0.7.0
 )
 
 require (

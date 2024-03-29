@@ -1035,7 +1035,7 @@ func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function) 
 
 func (r *FunctionReconciler) getKService(fn *openfunction.Function, gateway *networkingv1alpha1.Gateway) (string,
 	string, string, string, k8sgatewayapiv1beta1.PortNumber, error) {
-	log := r.Log.WithName("getKServiceByServing")
+	log := r.Log.WithName("getKService")
 	stableService := &kservingv1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fn.Status.RolloutStatus.Canary.Serving.Service,
@@ -1120,7 +1120,7 @@ func (r *FunctionReconciler) mutateHTTPRoute(
 		var namespace = k8sgatewayapiv1beta1.Namespace(ns)
 		var filter = k8sgatewayapiv1beta1.HTTPRouteFilter{
 			Type: k8sgatewayapiv1beta1.HTTPRouteFilterRequestHeaderModifier,
-			RequestHeaderModifier: &k8sgatewayapiv1beta1.HTTPRequestHeaderFilter{
+			RequestHeaderModifier: &k8sgatewayapiv1beta1.HTTPHeaderFilter{
 				Add: []k8sgatewayapiv1beta1.HTTPHeader{{
 					Name:  "Host",
 					Value: host,
@@ -1129,7 +1129,7 @@ func (r *FunctionReconciler) mutateHTTPRoute(
 		}
 		var stableFilter = k8sgatewayapiv1beta1.HTTPRouteFilter{
 			Type: k8sgatewayapiv1beta1.HTTPRouteFilterRequestHeaderModifier,
-			RequestHeaderModifier: &k8sgatewayapiv1beta1.HTTPRequestHeaderFilter{
+			RequestHeaderModifier: &k8sgatewayapiv1beta1.HTTPHeaderFilter{
 				Add: []k8sgatewayapiv1beta1.HTTPHeader{{
 					Name:  "Host",
 					Value: stableHost,
@@ -1191,11 +1191,13 @@ func (r *FunctionReconciler) mutateHTTPRoute(
 					path = fmt.Sprintf("/%s", path)
 				}
 			}
+
 			matchType := k8sgatewayapiv1beta1.PathMatchPathPrefix
 			rule := k8sgatewayapiv1beta1.HTTPRouteRule{
 				Matches: []k8sgatewayapiv1beta1.HTTPRouteMatch{{
 					Path: &k8sgatewayapiv1beta1.HTTPPathMatch{Type: &matchType, Value: &path},
 				}},
+				Filters: nil,
 				BackendRefs: []k8sgatewayapiv1beta1.HTTPBackendRef{
 					{
 						BackendRef: k8sgatewayapiv1beta1.BackendRef{

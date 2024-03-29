@@ -322,7 +322,7 @@ spec:
                                 target namespace that allows the certificate to be
                                 attached. If a ReferenceGrant does not allow this
                                 reference, the \"ResolvedRefs\" condition MUST be
-                                set to False for this listener with the \"InvalidCertificateRef\"
+                                set to False for this listener with the \"RefNotPermitted\"
                                 reason. \n This field is required to have at least
                                 one element when the mode is set to \"Terminate\"
                                 (default) and is optional otherwise. \n CertificateRefs
@@ -344,15 +344,16 @@ spec:
                                   group:
                                     default: ""
                                     description: Group is the group of the referent.
-                                      For example, "networking.k8s.io". When unspecified
-                                      (empty string), core API group is inferred.
+                                      For example, "gateway.networking.k8s.io". When
+                                      unspecified or empty string, core API group
+                                      is inferred.
                                     maxLength: 253
                                     pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                                     type: string
                                   kind:
                                     default: Secret
                                     description: Kind is kind of the referent. For
-                                      example "HTTPRoute" or "Service".
+                                      example "Secret".
                                     maxLength: 63
                                     minLength: 1
                                     pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$

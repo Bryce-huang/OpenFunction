@@ -470,17 +470,19 @@ func (dst *Function) ConvertFrom(srcRaw conversion.Hub) error {
 			})
 		}
 		var hosts []k8sgatewayapiv1alpha2.Hostname
-		for _, host := range src.Status.Route.Hosts {
-			hosts = append(hosts, k8sgatewayapiv1alpha2.Hostname(host))
-		}
 		var paths []k8sgatewayapiv1alpha2.HTTPPathMatch
 
-		for _, path := range src.Status.Route.Paths {
-			pType := k8sgatewayapiv1alpha2.PathMatchType(*path.Type)
-			paths = append(paths, k8sgatewayapiv1alpha2.HTTPPathMatch{
-				Type:  &pType,
-				Value: path.Value,
-			})
+		if src.Status.Route != nil {
+			for _, host := range src.Status.Route.Hosts {
+				hosts = append(hosts, k8sgatewayapiv1alpha2.Hostname(host))
+			}
+			for _, path := range src.Status.Route.Paths {
+				pType := k8sgatewayapiv1alpha2.PathMatchType(*path.Type)
+				paths = append(paths, k8sgatewayapiv1alpha2.HTTPPathMatch{
+					Type:  &pType,
+					Value: path.Value,
+				})
+			}
 		}
 
 		if src.Status.Route != nil {
