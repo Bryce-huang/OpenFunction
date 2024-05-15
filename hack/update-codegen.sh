@@ -42,7 +42,7 @@ echo ">> Temporary output directory ${TEMP_DIR}"
 # Ensure we can execute.
 chmod +x ${CODEGEN_PKG}/generate-groups.sh
 
-${CODEGEN_PKG}/generate-groups.sh "client" \
+${CODEGEN_PKG}/generate-groups.sh "client,lister,informer" \
     github.com/openfunction/pkg/client github.com/openfunction/apis \
     "core:v1beta1,v1beta2 events:v1alpha1 networking:v1alpha1" \
     --output-base "${TEMP_DIR}" \
