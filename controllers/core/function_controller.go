@@ -124,29 +124,45 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	r.defaultConfig = util.GetDefaultConfig(r.ctx, r.Client, r.Log)
 
-	if err := r.Get(ctx, req.NamespacedName, &fn); err != nil {
-		if util.IsNotFound(err) {
-			log.V(1).Info("Function deleted")
-		}
-		return ctrl.Result{}, util.IgnoreNotFound(err)
+	err := r.getNewerFunc(ctx, req, &fn, log)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	if err := r.createBuilder(&fn); err != nil {
 		return ctrl.Result{}, err
 	}
-	err := r.initRolloutStatus(&fn)
+	if !util.BuildFinished(&fn) {
+		log.Info("builder still not finished")
+		return ctrl.Result{RequeueAfter: constants.DefaultGatewayChangeCleanTime}, nil
+	}
+
+	err = r.initRolloutStatus(&fn)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.createServing(&fn); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	err = r.getNewerFunc(ctx, req, &fn, log)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !util.ServingReady(&fn) {
+		log.Info("serving still not ready")
+		return ctrl.Result{RequeueAfter: constants.DefaultGatewayChangeCleanTime}, nil
+	}
+
 	var recheckTime *time.Time
 	recheckTime, err = r.updateCanaryRelease(&fn)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
+	err = r.getNewerFunc(ctx, req, &fn, log)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if err = r.createOrUpdateHTTPRoute(&fn); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -169,10 +185,19 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 }
 
+func (r *FunctionReconciler) getNewerFunc(ctx context.Context, req ctrl.Request, fn *openfunction.Function, log logr.Logger) error {
+	if err := r.Get(ctx, req.NamespacedName, fn); err != nil {
+		if util.IsNotFound(err) {
+			log.V(1).Info("Function deleted")
+		}
+		return util.IgnoreNotFound(err)
+	}
+	return nil
+}
+
 func (r *FunctionReconciler) updateCanaryRelease(fn *openfunction.Function) (*time.Time, error) {
 	log := r.Log.WithName("UpdateCanaryRelease")
 	if !hasCanaryReleasePlan(fn) {
-		// no plan no status
 		if fn.Status.RolloutStatus.Canary.CanaryStepStatus != nil {
 			fn.Status.RolloutStatus.Canary.CanaryStepStatus = nil
 			if err := r.updateStatus(fn); err != nil {
@@ -594,7 +619,7 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 
 	serving := &openfunction.Serving{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "serving-",
+			GenerateName: fn.Name + "-",
 			Namespace:    fn.Namespace,
 			Labels: map[string]string{
 				constants.FunctionLabel: fn.Name,
@@ -724,9 +749,8 @@ func (r *FunctionReconciler) updateFuncWithServingStatus(fn *openfunction.Functi
 	}
 
 	// If serving status changed, update function serving status.
-	if servingCondition.State != serving.Status.State ||
-		servingCondition.Reason != serving.Status.Reason ||
-		servingCondition.Message != serving.Status.Message {
+	if servingChange(servingCondition, serving) {
+
 		servingCondition.State = serving.Status.State
 		servingCondition.Reason = serving.Status.Reason
 		servingCondition.Message = serving.Status.Message
@@ -747,6 +771,12 @@ func (r *FunctionReconciler) updateFuncWithServingStatus(fn *openfunction.Functi
 	}
 
 	return nil
+}
+
+func servingChange(servingCondition *openfunction.Condition, serving openfunction.Serving) bool {
+	return servingCondition.State != serving.Status.State ||
+		servingCondition.Reason != serving.Status.Reason ||
+		servingCondition.Message != serving.Status.Message
 }
 
 // Clean up redundant servings caused by the `createOrUpdateBuilder` function failed.
@@ -896,7 +926,7 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	oldHash := fn.Status.Serving.ResourceHash
 	oldName := fn.Status.Serving.ResourceRef
 	// Serving had not created, need to create.
-	if fn.Status.Serving.State == "" || oldHash == "" || (oldName == "" && fn.Spec.Serving != nil) {
+	if r.servingExits(fn) {
 		log.V(1).Info("Serving not created")
 		return true
 	}
@@ -908,11 +938,6 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 		return true
 	}
 
-	// It will skip serving, no need to create serving.
-	if fn.Spec.Serving == nil {
-		return false
-	}
-
 	var serving openfunction.Serving
 	key := client.ObjectKey{Namespace: fn.Namespace, Name: oldName}
 	if err := r.Get(r.ctx, key, &serving); util.IsNotFound(err) {
@@ -922,6 +947,10 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	}
 
 	return false
+}
+
+func (r *FunctionReconciler) servingExits(fn *openfunction.Function) bool {
+	return fn.Status.Serving.State != "" && fn.Status.Serving.ResourceHash != "" && fn.Status.Serving.ResourceRef != ""
 }
 
 func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function) error {
