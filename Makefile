@@ -14,9 +14,10 @@
 # limitations under the License.
 #
 
-VERSION?=$(shell cat VERSION | tr -d " \t\n\r")
+#VERSION?=$(shell cat VERSION | tr -d " \t\n\r")
+VERSION="v1.5.0"
 # Image URL to use all building/pushing image targets
-IMG ?= openfunction/openfunction:$(VERSION)
+IMG ?= brycehuang/openfunction:$(VERSION)
 IMG_DEV ?= openfunctiondev/openfunction:$(VERSION)
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 #CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"

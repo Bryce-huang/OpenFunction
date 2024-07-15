@@ -619,7 +619,7 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 
 	serving := &openfunction.Serving{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fn.Name + "-",
+			GenerateName: "serving-",
 			Namespace:    fn.Namespace,
 			Labels: map[string]string{
 				constants.FunctionLabel: fn.Name,
