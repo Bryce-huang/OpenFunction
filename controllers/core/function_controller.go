@@ -926,10 +926,6 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	oldHash := fn.Status.Serving.ResourceHash
 	oldName := fn.Status.Serving.ResourceRef
 	// Serving had not created, need to create.
-	if r.servingExits(fn) {
-		log.V(1).Info("Serving not created")
-		return true
-	}
 
 	newHash := util.Hash(r.createServingSpec(fn))
 	// Serving changed, need to update.
@@ -947,10 +943,6 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	}
 
 	return false
-}
-
-func (r *FunctionReconciler) servingExits(fn *openfunction.Function) bool {
-	return fn.Status.Serving.State != "" && fn.Status.Serving.ResourceHash != "" && fn.Status.Serving.ResourceRef != ""
 }
 
 func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function) error {
