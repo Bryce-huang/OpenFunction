@@ -69,7 +69,9 @@ func Registry(rm meta.RESTMapper) []client.Object {
 
 	return objs
 }
-
+func (r *servingRun) Exist(s *openfunction.Serving) bool {
+	return false
+}
 func NewServingRun(ctx context.Context, c client.Client, scheme *runtime.Scheme, log logr.Logger) core.ServingRun {
 	return &servingRun{
 		c,

@@ -25,8 +25,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/uuid"
+
+	"github.com/patrickmn/go-cache"
 
 	"k8s.io/client-go/util/retry"
 
@@ -62,11 +67,27 @@ import (
 )
 
 const (
-	GatewayField = ".spec.route.gatewayRef"
-
+	GatewayField  = ".spec.route.gatewayRef"
 	buildAction   = "Build"
 	servingAction = "Serving"
 )
+
+var c = cache.New(5*time.Minute, 10*time.Minute)
+var l sync.Mutex
+
+func getLock(name string) sync.Locker {
+	l.Lock()
+	defer l.Unlock()
+	if ca, ok := c.Get(name); ok {
+		c.Set(name, ca, time.Minute*5)
+		return ca.(sync.Locker)
+	} else {
+		ml := &sync.Mutex{}
+		c.Set(name, ml, time.Minute*5)
+		return ml
+	}
+
+}
 
 // FunctionReconciler reconciles a Function object
 type FunctionReconciler struct {
@@ -113,8 +134,11 @@ func NewFunctionReconciler(mgr manager.Manager, interval time.Duration, eventRec
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	l.Lock()
+	defer l.Unlock()
+
 	r.ctx = ctx
-	log := r.Log.WithValues("Function", req.NamespacedName)
+	log := r.Log.WithValues("Function", req.NamespacedName, "traceID", uuid.NewUUID())
 
 	fn := openfunction.Function{
 		ObjectMeta: metav1.ObjectMeta{
@@ -133,7 +157,8 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 	if !util.BuildFinished(&fn) {
-		log.Info("builder still not finished")
+		log.Info("builder still not finished", "status", util.GetBuildStatus(&fn))
+
 		return ctrl.Result{RequeueAfter: constants.DefaultGatewayChangeCleanTime}, nil
 	}
 
@@ -141,6 +166,7 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// do not update before compare serving
 	if err := r.createServing(&fn); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -347,7 +373,9 @@ func (r *FunctionReconciler) createBuilder(fn *openfunction.Function) error {
 			State:        openfunction.Skipped,
 			ResourceHash: util.Hash(openfunction.BuilderSpec{}),
 		}
-		fn.Status.Serving = &openfunction.Condition{}
+		if fn.Status.Serving == nil {
+			fn.Status.Serving = &openfunction.Condition{}
+		}
 		if err := r.updateStatus(fn); err != nil {
 			log.Error(err, "Failed to update function build status")
 			return err
@@ -425,6 +453,7 @@ func (r *FunctionReconciler) updateFuncWithBuilderStatus(fn *openfunction.Functi
 	if fn.Status.Build.State != builder.Status.State ||
 		fn.Status.Build.Reason != builder.Status.Reason ||
 		fn.Status.Build.Message != builder.Status.Message {
+
 		fn.Status.Build.State = builder.Status.State
 		fn.Status.Build.Reason = builder.Status.Reason
 		fn.Status.Build.Message = builder.Status.Message
@@ -553,6 +582,7 @@ func (r *FunctionReconciler) createBuilderSpec(fn *openfunction.Function) openfu
 }
 
 func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
+
 	log := r.Log.WithName("CreateServing").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
@@ -581,33 +611,35 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 
 	// Reset function serving status.
 	if fn.Status.Serving == nil {
+		log.Info("serving is nil")
 		fn.Status.Serving = &openfunction.Condition{}
 	}
-	fn.Status.Serving.State = ""
-	fn.Status.Serving.Reason = ""
-	fn.Status.Serving.Message = ""
-	fn.Status.Serving.ResourceRef = ""
-	fn.Status.Serving.ResourceHash = ""
-	if err := r.updateStatus(fn); err != nil {
-		log.Error(err, "Failed to reset function serving status")
-		return err
-	}
+	//fn.Status.Serving.State = ""
+	//fn.Status.Serving.Reason = ""
+	//fn.Status.Serving.Message = ""
+	//fn.Status.Serving.ResourceRef = ""
+	//fn.Status.Serving.ResourceHash = ""
+	//if err := r.updateStatus(fn); err != nil {
+	//	log.Error(err, "Failed to reset function serving status")
+	//	return err
+	//}
 
-	if fn.Spec.Serving == nil {
-		fn.Status.Serving = &openfunction.Condition{
-			State:        openfunction.Skipped,
-			ResourceHash: util.Hash(openfunction.ServingSpec{}),
-		}
-		if err := r.updateStatus(fn); err != nil {
-			log.Error(err, "Failed to update function serving status")
-			return err
-		}
-
-		log.V(1).Info("Skip serving")
-		return nil
-	}
+	//if fn.Spec.Serving == nil {
+	//	fn.Status.Serving = &openfunction.Condition{
+	//		State:        openfunction.Skipped,
+	//		ResourceHash: util.Hash(openfunction.ServingSpec{}),
+	//	}
+	//	if err := r.updateStatus(fn); err != nil {
+	//		log.Error(err, "Failed to update function serving status")
+	//		return err
+	//	}
+	//
+	//	log.V(1).Info("Skip serving")
+	//	return nil
+	//}
 	servingSpec := r.createServingSpec(fn)
 	newServingHash := util.Hash(servingSpec)
+
 	// rollback
 	if inCanaryProgress(fn) && fn.Status.RolloutStatus.Canary.Serving.ResourceHash == newServingHash {
 		err := r.canaryRollback(fn)
@@ -623,6 +655,7 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 			Namespace:    fn.Namespace,
 			Labels: map[string]string{
 				constants.FunctionLabel: fn.Name,
+				"faas-hash":             newServingHash,
 			},
 			Annotations: fn.Annotations,
 		},
@@ -931,7 +964,13 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	// Serving changed, need to update.
 	if newHash != oldHash {
 		log.V(1).Info("Serving changed", "old", oldHash, "new", newHash)
-		return true
+		services := &openfunction.ServingList{}
+		if err := r.List(r.ctx, services, client.InNamespace(fn.Namespace), client.MatchingLabels{"faas-hash": newHash}); err != nil {
+			log.Error(err, "failed to list serving")
+			return true
+		}
+		return len(services.Items) == 0
+
 	}
 
 	var serving openfunction.Serving
@@ -1614,16 +1653,11 @@ func (r *FunctionReconciler) findObjectsForGateway(gateway client.Object) []reco
 }
 
 func (r *FunctionReconciler) initRolloutStatus(fn *openfunction.Function) error {
-	log := r.Log.WithName("InitRolloutStatus")
-
 	if fn.Status.RolloutStatus == nil {
 		fn.Status.RolloutStatus = &openfunction.RolloutStatus{
 			Canary: &openfunction.CanaryStatus{},
 		}
-		if err := r.updateStatus(fn); err != nil {
-			log.Error(err, "failed to init RolloutStatus")
-			return err
-		}
+
 	}
 	return nil
 

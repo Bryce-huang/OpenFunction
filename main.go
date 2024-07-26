@@ -87,11 +87,22 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.DurationVar(&interval, "builder-check-interval", time.Minute, "The interval used to check the expired builder")
 
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		setupLog.Error(err, "unable to get china time")
+		os.Exit(1)
+	}
+
+	// 自定义时间编码器，以带时间戳的北京时间格式化
+	timeEncoder := zapcore.TimeEncoder(func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(t.In(location).Format("2006-01-02 15:04:05.000"))
+	})
+
 	// Use `--zap-log-level=debug` to enable debug log.
 	opts := zap.Options{
 		Development:     true,
 		StacktraceLevel: zapcore.PanicLevel,
-		TimeEncoder:     zapcore.RFC3339TimeEncoder,
+		TimeEncoder:     timeEncoder,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

@@ -1,21 +1,79 @@
 apiVersion: core.openfunction.io/v1beta2
 kind: Function
 metadata:
-  name: function-sample-serving-only
+
+  name: fc-7193-test
+
 spec:
-  image: openfunctiondev/v1beta1-http:latest
+#  build:
+#    builder: 10.107.103.57/k8s/wfaas/builder-java:11-2
+#    env:
+#      FUNC_CLEAR_SOURCE: "true"
+#      GOOGLE_FUNCTION_TARGET: cn.webank.Main
+#      MAVEN_REPOSITORY: http://10.107.100.11:20002/nexus/content/groups/public/
+#    failedBuildsHistoryLimit: 10
+#    srcRepo:
+#      credentials:
+#        name: ssh-key
+#      revision: master
+#      sourceSubPath: fc-7193-test
+#      url: ssh://git@10.107.100.11:20003/inf/wfaas-functionhub.git
+#    successfulBuildsHistoryLimit: 10
+  image: brycehuang/web-service-image:v1
   serving:
+#    annotations:
+#      queue.sidecar.serving.knative.dev/cpu-resource-limit: "0.1"
+#      queue.sidecar.serving.knative.dev/cpu-resource-request: "0.02"
+#      queue.sidecar.serving.knative.dev/memory-resource-limit: 0.2Gi
+#      queue.sidecar.serving.knative.dev/memory-resource-request: 0.02Gi
+#    labels:
+#      app: fc-7193-test
+#      subsystem: eiet-whhelper
+#      subsystemId: "7193"
+#    params:
+#      WAAS_GATEWAY_ADDRESS: http://uat.api.wfaas.stgwebank
+    scaleOptions:
+      knative:
+        autoscaling.knative.dev/metric: rps
+        autoscaling.knative.dev/panic-threshold-percentage: "150"
+        autoscaling.knative.dev/panic-window-percentage: "10"
+        autoscaling.knative.dev/target: "50"
+        autoscaling.knative.dev/window: 60s
+      maxReplicas: 10
+      minReplicas: 0
     template:
       containers:
-        - imagePullPolicy: Always
+        - imagePullPolicy: IfNotPresent
           name: function
-          resources: {}
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 107374182400m
     triggers:
       http:
+        engine: knative
         port: 8080
-        route:
-          gatewayRef:
-            name: openfunction
-            namespace: openfunction
-  version: v1.0.0
+#        route:
+#          gatewayRef:
+#            name: openfunction
+#            namespace: 1669-t0j
+#          hostnames:
+#            - uat.api.wfaas.stgwebank
+#            - api.wfaas.weoa.com
+#            - fc-7193-test.1675-de3.svc.cluster.local
+#          rules:
+#            - filters:
+#                - type: URLRewrite
+#                  urlRewrite:
+#                    path:
+#                      replacePrefixMatch: /
+#                      type: ReplacePrefixMatch
+#              matches:
+#                - path:
+#                    type: PathPrefix
+#                    value: /fc-7193-test
+  version: "20240531025035"
   workloadRuntime: OCIContainer

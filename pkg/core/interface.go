@@ -49,4 +49,5 @@ type ServingRun interface {
 	Result(s *openfunction.Serving) (string, string, string, error)
 	// Clean all resources which created by serving.
 	Clean(s *openfunction.Serving) error
+	Exist(s *openfunction.Serving) bool
 }

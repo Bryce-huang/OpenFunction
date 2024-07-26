@@ -209,7 +209,9 @@ func (r *servingRun) Clean(s *openfunction.Serving) error {
 
 	return nil
 }
-
+func (r *servingRun) Exist(s *openfunction.Serving) bool {
+	return false
+}
 func (r *servingRun) Result(s *openfunction.Serving) (string, string, string, error) {
 	log := r.log.WithName("Result").
 		WithValues("Serving", fmt.Sprintf("%s/%s", s.Namespace, s.Name))

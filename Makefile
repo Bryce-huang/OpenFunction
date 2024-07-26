@@ -112,7 +112,7 @@ run: manifests ## Run a controller from your host.
 docker-build: all ## Build docker image with the openfunction.
 	docker build -t ${IMG} .
 
-docker-push: ## Push docker image with the openfunction.
+docker-push: docker-build ## Push docker image with the openfunction.
 	docker push ${IMG}
 
 docker-build-dev: all ## Build dev docker image with the openfunction.

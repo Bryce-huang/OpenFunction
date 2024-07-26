@@ -71,6 +71,8 @@ func NewServingReconciler(mgr manager.Manager, eventRecorder events.EventRecorde
 	return r
 }
 
+var sl sync.Mutex
+
 //+kubebuilder:rbac:groups=core.openfunction.io,resources=servings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core.openfunction.io,resources=servings/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=core.openfunction.io,resources=servings/finalizers,verbs=update
@@ -92,6 +94,8 @@ func NewServingReconciler(mgr manager.Manager, eventRecorder events.EventRecorde
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	sl.Lock()
+	defer sl.Unlock()
 	r.ctx = ctx
 	log := r.Log.WithValues("Serving", req.NamespacedName)
 
@@ -110,6 +114,7 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Serving start timeout, update serving status.
 	if s.Spec.Timeout != nil &&
 		time.Since(s.CreationTimestamp.Time) > s.Spec.Timeout.Duration {
+		log.Info("serving start timeout")
 		if s.Status.IsStarting() {
 			s.Status.State = openfunction.Timeout
 			if err := r.updateStatus(&s); err != nil {
@@ -138,6 +143,10 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		return ctrl.Result{}, nil
 	}
+	if servingRun.Exist(&s) {
+		log.Info("ServingRun Already Exist")
+		return ctrl.Result{}, nil
+	}
 
 	if s.Spec.Timeout != nil &&
 		time.Since(s.CreationTimestamp.Time) > s.Spec.Timeout.Duration {
@@ -161,11 +170,6 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Reset serving status.
 	s.Status = openfunction.ServingStatus{}
-
-	err := r.updateStatus(&s)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 
 	if err := servingRun.Run(&s, r.defaultConfig); err != nil {
 		doOnce.Do(func() {

@@ -143,7 +143,17 @@ func (r *servingRun) Clean(s *openfunction.Serving) error {
 
 	return nil
 }
+func (r *servingRun) Exist(s *openfunction.Serving) bool {
+	log := r.log.WithName("Exist").
+		WithValues("Serving", fmt.Sprintf("%s/%s", s.Namespace, s.Name))
+	services := &kservingv1.ServiceList{}
+	if err := r.List(r.ctx, services, client.InNamespace(s.Namespace), client.MatchingLabels{common.ServingLabel: s.Name}); err != nil {
+		log.Error(err, "failed to list ksvc")
+		return false
+	}
+	return len(services.Items) != 0
 
+}
 func (r *servingRun) Result(s *openfunction.Serving) (string, string, string, error) {
 	log := r.log.WithName("Result").
 		WithValues("Serving", fmt.Sprintf("%s/%s", s.Namespace, s.Name))

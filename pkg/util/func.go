@@ -8,6 +8,13 @@ func BuildFinished(f *openfunction.Function) bool {
 	}
 	return f.Status.Build.State == openfunction.Succeeded || f.Status.Build.State == openfunction.Skipped
 }
+func GetBuildStatus(f *openfunction.Function) string {
+	if f.Status.Build == nil {
+		return openfunction.Skipped
+	}
+	return f.Status.Build.State
+}
+
 func ServingReady(f *openfunction.Function) bool {
 	if f.Status.Serving == nil {
 		return false
