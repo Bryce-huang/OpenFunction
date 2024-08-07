@@ -25,13 +25,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/uuid"
-
-	"github.com/patrickmn/go-cache"
 
 	"k8s.io/client-go/util/retry"
 
@@ -72,22 +69,22 @@ const (
 	servingAction = "Serving"
 )
 
-var c = cache.New(5*time.Minute, 10*time.Minute)
-var l sync.Mutex
-
-func getLock(name string) sync.Locker {
-	l.Lock()
-	defer l.Unlock()
-	if ca, ok := c.Get(name); ok {
-		c.Set(name, ca, time.Minute*5)
-		return ca.(sync.Locker)
-	} else {
-		ml := &sync.Mutex{}
-		c.Set(name, ml, time.Minute*5)
-		return ml
-	}
-
-}
+//var c = cache.New(5*time.Minute, 10*time.Minute)
+//var l sync.Mutex
+//
+//func getLock(name string) sync.Locker {
+//	l.Lock()
+//	defer l.Unlock()
+//	if ca, ok := c.Get(name); ok {
+//		c.Set(name, ca, time.Minute*5)
+//		return ca.(sync.Locker)
+//	} else {
+//		ml := &sync.Mutex{}
+//		c.Set(name, ml, time.Minute*5)
+//		return ml
+//	}
+//
+//}
 
 // FunctionReconciler reconciles a Function object
 type FunctionReconciler struct {
@@ -134,11 +131,9 @@ func NewFunctionReconciler(mgr manager.Manager, interval time.Duration, eventRec
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	l.Lock()
-	defer l.Unlock()
-
+	ctxLog := r.Log.WithValues("traceID", uuid.NewUUID())
 	r.ctx = ctx
-	log := r.Log.WithValues("Function", req.NamespacedName, "traceID", uuid.NewUUID())
+	log := ctxLog.WithValues("Function", req.NamespacedName)
 
 	fn := openfunction.Function{
 		ObjectMeta: metav1.ObjectMeta{
@@ -146,50 +141,44 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			Namespace: req.Namespace,
 		},
 	}
-	r.defaultConfig = util.GetDefaultConfig(r.ctx, r.Client, r.Log)
+	r.defaultConfig = util.GetDefaultConfig(r.ctx, r.Client, &ctxLog)
 
-	err := r.getNewerFunc(ctx, req, &fn, log)
-	if err != nil {
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, req.NamespacedName, &fn); err != nil {
+		if util.IsNotFound(err) {
+			log.V(1).Info("Function deleted")
+		}
+		return ctrl.Result{}, util.IgnoreNotFound(err)
 	}
 
-	if err := r.createBuilder(&fn); err != nil {
+	if err := r.createBuilder(&fn, &ctxLog); err != nil {
 		return ctrl.Result{}, err
 	}
 	if !util.BuildFinished(&fn) {
 		log.Info("builder still not finished", "status", util.GetBuildStatus(&fn))
-
 		return ctrl.Result{RequeueAfter: constants.DefaultGatewayChangeCleanTime}, nil
 	}
 
-	err = r.initRolloutStatus(&fn)
+	err := r.initRolloutStatus(&fn)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	// do not update before compare serving
-	if err := r.createServing(&fn); err != nil {
+	if err := r.createServing(&fn, &ctxLog); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	err = r.getNewerFunc(ctx, req, &fn, log)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 	if !util.ServingReady(&fn) {
 		log.Info("serving still not ready")
 		return ctrl.Result{RequeueAfter: constants.DefaultGatewayChangeCleanTime}, nil
 	}
 
 	var recheckTime *time.Time
-	recheckTime, err = r.updateCanaryRelease(&fn)
+	recheckTime, err = r.updateCanaryRelease(&fn, &ctxLog)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	err = r.getNewerFunc(ctx, req, &fn, log)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if err = r.createOrUpdateHTTPRoute(&fn); err != nil {
+
+	if err = r.createOrUpdateHTTPRoute(&fn, &ctxLog); err != nil {
 		return ctrl.Result{}, err
 	}
 	ready, err := r.httpRouteIsReady(&fn)
@@ -211,18 +200,8 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 }
 
-func (r *FunctionReconciler) getNewerFunc(ctx context.Context, req ctrl.Request, fn *openfunction.Function, log logr.Logger) error {
-	if err := r.Get(ctx, req.NamespacedName, fn); err != nil {
-		if util.IsNotFound(err) {
-			log.V(1).Info("Function deleted")
-		}
-		return util.IgnoreNotFound(err)
-	}
-	return nil
-}
-
-func (r *FunctionReconciler) updateCanaryRelease(fn *openfunction.Function) (*time.Time, error) {
-	log := r.Log.WithName("UpdateCanaryRelease")
+func (r *FunctionReconciler) updateCanaryRelease(fn *openfunction.Function, ctxLog *logr.Logger) (*time.Time, error) {
+	log := ctxLog.WithName("UpdateCanaryRelease")
 	if !hasCanaryReleasePlan(fn) {
 		if fn.Status.RolloutStatus.Canary.CanaryStepStatus != nil {
 			fn.Status.RolloutStatus.Canary.CanaryStepStatus = nil
@@ -328,12 +307,12 @@ func inCanaryProgress(fn *openfunction.Function) bool {
 	return fn.Status.RolloutStatus.Canary.CanaryStepStatus.Phase == openfunction.CanaryPhaseProgressing
 }
 
-func (r *FunctionReconciler) createBuilder(fn *openfunction.Function) error {
-	log := r.Log.WithName("CreateBuilder").
+func (r *FunctionReconciler) createBuilder(fn *openfunction.Function, ctxLog *logr.Logger) error {
+	log := ctxLog.WithName("CreateBuilder").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
-	if !r.needToCreateBuilder(fn) {
-		if err := r.updateFuncWithBuilderStatus(fn); err != nil {
+	if !r.needToCreateBuilder(fn, ctxLog) {
+		if err := r.updateFuncWithBuilderStatus(fn, ctxLog); err != nil {
 			return err
 		}
 
@@ -421,8 +400,8 @@ func (r *FunctionReconciler) createBuilder(fn *openfunction.Function) error {
 }
 
 // Update the status of the function with the result of the build.
-func (r *FunctionReconciler) updateFuncWithBuilderStatus(fn *openfunction.Function) error {
-	log := r.Log.WithName("UpdateFuncWithBuilderStatus").
+func (r *FunctionReconciler) updateFuncWithBuilderStatus(fn *openfunction.Function, ctxLog *logr.Logger) error {
+	log := ctxLog.WithName("UpdateFuncWithBuilderStatus").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
 	// Build had not created or not completed, no need to update function status.
@@ -581,19 +560,19 @@ func (r *FunctionReconciler) createBuilderSpec(fn *openfunction.Function) openfu
 	return spec
 }
 
-func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
+func (r *FunctionReconciler) createServing(fn *openfunction.Function, ctxLog *logr.Logger) error {
 
-	log := r.Log.WithName("CreateServing").
+	log := ctxLog.WithName("CreateServing").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
-	if !r.needToCreateServing(fn) {
+	if !r.needToCreateServing(fn, ctxLog) {
 		log.V(1).Info("No need to create Serving")
-		if err := r.updateFuncWithServingStatus(fn, fn.Status.Serving); err != nil {
+		if err := r.updateFuncWithServingStatus(fn, fn.Status.Serving, ctxLog); err != nil {
 			return err
 		}
 		// in canary progress need to update canary serving
 		if inCanaryProgress(fn) {
-			if err := r.updateFuncWithServingStatus(fn, fn.Status.RolloutStatus.Canary.Serving); err != nil {
+			if err := r.updateFuncWithServingStatus(fn, fn.Status.RolloutStatus.Canary.Serving, ctxLog); err != nil {
 				log.Error(err, "Failed to update function canary serving status")
 				return err
 			}
@@ -654,8 +633,8 @@ func (r *FunctionReconciler) createServing(fn *openfunction.Function) error {
 			GenerateName: "serving-",
 			Namespace:    fn.Namespace,
 			Labels: map[string]string{
-				constants.FunctionLabel: fn.Name,
-				"faas-hash":             newServingHash,
+				constants.FunctionLabel:    fn.Name,
+				constants.ServingHashLabel: newServingHash,
 			},
 			Annotations: fn.Annotations,
 		},
@@ -755,8 +734,8 @@ func (r *FunctionReconciler) copyServingStatusForCanary(fn *openfunction.Functio
 }
 
 // Update the status of the function with the result of the serving.
-func (r *FunctionReconciler) updateFuncWithServingStatus(fn *openfunction.Function, servingCondition *openfunction.Condition) error {
-	log := r.Log.WithName("UpdateFuncWithServingStatus").
+func (r *FunctionReconciler) updateFuncWithServingStatus(fn *openfunction.Function, servingCondition *openfunction.Condition, ctxLog *logr.Logger) error {
+	log := ctxLog.WithName("UpdateFuncWithServingStatus").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 	// Serving had not created, no need to update function status.
 	if servingCondition == nil || servingCondition.State == "" {
@@ -894,8 +873,8 @@ func getServingImage(fn *openfunction.Function) string {
 	return repo + "@" + fn.Status.Revision.ImageDigest
 }
 
-func (r *FunctionReconciler) needToCreateBuilder(fn *openfunction.Function) bool {
-	log := r.Log.WithName("NeedToCreateBuilder").
+func (r *FunctionReconciler) needToCreateBuilder(fn *openfunction.Function, ctxLog *logr.Logger) bool {
+	log := ctxLog.WithName("NeedToCreateBuilder").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
 	// Builder had not created, need to create.
@@ -942,9 +921,9 @@ func getBuilderHash(spec openfunction.BuilderSpec) string {
 	return util.Hash(newSpec)
 }
 
-func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool {
+func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function, ctxLog *logr.Logger) bool {
 
-	log := r.Log.WithName("NeedToCreateServing").
+	log := ctxLog.WithName("NeedToCreateServing").
 		WithValues("Function", fmt.Sprintf("%s/%s", fn.Namespace, fn.Name))
 
 	// The build is still in process, no need to create or update serving.
@@ -965,11 +944,23 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	if newHash != oldHash {
 		log.V(1).Info("Serving changed", "old", oldHash, "new", newHash)
 		services := &openfunction.ServingList{}
-		if err := r.List(r.ctx, services, client.InNamespace(fn.Namespace), client.MatchingLabels{"faas-hash": newHash}); err != nil {
+		if err := r.List(r.ctx, services, client.InNamespace(fn.Namespace), client.MatchingLabels{constants.ServingHashLabel: newHash}); err != nil {
 			log.Error(err, "failed to list serving")
 			return true
 		}
-		return len(services.Items) == 0
+		if len(services.Items) != 0 {
+			log.Info("serving already created", "serving", services.Items[0].Name)
+
+			fn.Status.Serving = &openfunction.Condition{
+				State:                     openfunction.Created,
+				ResourceRef:               services.Items[0].Name,
+				ResourceHash:              newHash,
+				LastSuccessfulResourceRef: fn.Status.Serving.LastSuccessfulResourceRef,
+			}
+
+			return false
+		}
+		return true
 
 	}
 
@@ -984,8 +975,8 @@ func (r *FunctionReconciler) needToCreateServing(fn *openfunction.Function) bool
 	return false
 }
 
-func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function) error {
-	log := r.Log.WithName("createOrUpdateHTTPRoute")
+func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function, ctxLog *logr.Logger) error {
+	log := ctxLog.WithName("createOrUpdateHTTPRoute")
 	var err error
 	if fn.Status.Serving == nil ||
 		fn.Status.Serving.State != openfunction.Running ||
@@ -1040,6 +1031,7 @@ func (r *FunctionReconciler) createOrUpdateHTTPRoute(fn *openfunction.Function) 
 	if fn.Spec.Serving.Triggers.Http.Engine == nil || *fn.Spec.Serving.Triggers.Http.Engine == openfunction.HttpEngineKnative {
 		stableServiceName, stableHost, serviceName, host, port, err = r.getKService(fn, gateway)
 		if err != nil {
+			log.Error(err, "Failed to get ksvc", "namespace", route.GatewayRef.Namespace, "fc name", fn.Name)
 			return err
 		}
 		ns = fn.Namespace

@@ -182,7 +182,7 @@ func CreateDaprProxy(
 	annotations = util.AppendLabels(s.Spec.Annotations, annotations)
 	annotations[DaprEnabled] = "true"
 
-	defaultConfig := util.GetDefaultConfig(ctx, c, logger)
+	defaultConfig := util.GetDefaultConfig(ctx, c, &logger)
 	image := util.GetConfigOrDefault(defaultConfig,
 		"openfunction.dapr-proxy.image",
 		DefaultDaprProxyImage,

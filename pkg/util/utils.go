@@ -64,7 +64,7 @@ func GetConfigOrDefault(cm map[string]string, key string, defaultVal string) str
 	return defaultVal
 }
 
-func GetDefaultConfig(ctx context.Context, c client.Client, log logr.Logger) map[string]string {
+func GetDefaultConfig(ctx context.Context, c client.Client, log *logr.Logger) map[string]string {
 	log.WithName("Config").WithValues("ConfigMap", constants.DefaultConfigMapName)
 	cm := &corev1.ConfigMap{}
 	ns := os.Getenv(constants.DefaultNamespaceKey)

@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/uuid"
+
 	componentsv1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	"github.com/go-logr/logr"
 	"github.com/kedacore/keda/v2/apis/keda/v1alpha1"
@@ -92,7 +94,8 @@ type Subscribers struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("Trigger", req.NamespacedName)
+	ctxLog := r.Log.WithValues("traceID", uuid.NewUUID())
+	log := ctxLog.WithValues("Trigger", req.NamespacedName)
 	log.Info("trigger reconcile starting...")
 
 	trigger := &ofevent.Trigger{}
@@ -101,7 +104,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.TriggerConfig.LogLevel = DefaultLogLevel
 
 	// Get default global configuration from ConfigMap
-	r.defaultConfig = util.GetDefaultConfig(ctx, r.Client, r.Log)
+	r.defaultConfig = util.GetDefaultConfig(ctx, r.Client, &ctxLog)
 
 	if err := r.Get(ctx, req.NamespacedName, trigger); err != nil {
 		log.V(1).Info("Trigger deleted", "error", err)

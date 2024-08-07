@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/uuid"
+
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 
@@ -94,10 +96,9 @@ var sl sync.Mutex
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	sl.Lock()
-	defer sl.Unlock()
+	ctxLog := r.Log.WithValues("traceID", uuid.NewUUID())
 	r.ctx = ctx
-	log := r.Log.WithValues("Serving", req.NamespacedName)
+	log := ctxLog.WithValues("Serving", req.NamespacedName)
 
 	var s openfunction.Serving
 
@@ -128,7 +129,7 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Get default global configuration from ConfigMap
-	r.defaultConfig = util.GetDefaultConfig(r.ctx, r.Client, r.Log)
+	r.defaultConfig = util.GetDefaultConfig(r.ctx, r.Client, &ctxLog)
 
 	// Start timer if serving is starting.
 	if s.Status.IsStarting() {

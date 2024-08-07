@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/uuid"
+
 	componentsv1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	"github.com/go-logr/logr"
 	kedav1alpha1 "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
@@ -87,7 +89,8 @@ type EventSourceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *EventSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("EventSource", req.NamespacedName)
+	ctxLog := r.Log.WithValues("traceID", uuid.NewUUID())
+	log := ctxLog.WithValues("EventSource", req.NamespacedName)
 	log.Info("EventSource reconcile starting...")
 
 	eventSource := &ofevent.EventSource{}
@@ -95,7 +98,7 @@ func (r *EventSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	r.EventSourceConfig.LogLevel = DefaultLogLevel
 
 	// Get default global configuration from ConfigMap
-	r.defaultConfig = util.GetDefaultConfig(ctx, r.Client, r.Log)
+	r.defaultConfig = util.GetDefaultConfig(ctx, r.Client, &ctxLog)
 
 	if err := r.Get(ctx, req.NamespacedName, eventSource); err != nil {
 		log.V(1).Info("EventSource deleted", "error", err)

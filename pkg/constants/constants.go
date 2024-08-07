@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	FunctionLabel = "openfunction.io/function"
+	FunctionLabel    = "openfunction.io/function"
+	ServingHashLabel = "openfunction.io/serving-hash"
 
 	CommonLabelVersion = "app.kubernetes.io/version"
 
